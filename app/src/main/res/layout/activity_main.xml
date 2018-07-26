@@ -5,7 +5,7 @@
 
     <fragment
         android:id="@+id/choose_area_fragment"
-        android:name="com.demo.karl.aweather.ChooseAreaFragment"
+        android:name="com.demo.karl.aweather.ChooseHotAreaFragment"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 

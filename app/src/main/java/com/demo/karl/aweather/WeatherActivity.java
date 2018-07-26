@@ -3,12 +3,17 @@ package com.demo.karl.aweather;
 import android.app.ProgressDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.location.Location;
 import android.preference.PreferenceManager;
+import android.support.v4.view.GravityCompat;
+import android.support.v4.widget.DrawerLayout;
+import android.support.v4.widget.SwipeRefreshLayout;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -21,6 +26,7 @@ import com.demo.karl.aweather.gson.WeatherForecast;
 import com.demo.karl.aweather.gson.AirNow;
 import com.demo.karl.aweather.gson.WeatherLifeStyle;
 import com.demo.karl.aweather.util.HttpUtil;
+import com.demo.karl.aweather.util.LocationUtils;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -37,13 +43,22 @@ import java.util.List;
 
 import interfaces.heweather.com.interfacesmodule.bean.Lang;
 import interfaces.heweather.com.interfacesmodule.bean.Unit;
+import interfaces.heweather.com.interfacesmodule.bean.basic.Basic;
+import interfaces.heweather.com.interfacesmodule.bean.search.Search;
 import interfaces.heweather.com.interfacesmodule.view.HeWeather;
 import okhttp3.Call;
 import okhttp3.Callback;
 import okhttp3.Response;
 
+import static interfaces.heweather.com.interfacesmodule.bean.Lang.CHINESE_SIMPLIFIED;
+
 
 public class WeatherActivity extends AppCompatActivity {
+
+    public DrawerLayout drawerLayout;
+    private Button navButton;
+
+    public SwipeRefreshLayout swipeRefresh;
 
     private ScrollView weatherLayout;
     private TextView titleCity;
@@ -70,12 +85,20 @@ public class WeatherActivity extends AppCompatActivity {
 
     private ProgressDialog progressDialog;
 
+    private String cid;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_weather);
 
         // 初始化控件
+        drawerLayout = (DrawerLayout)findViewById(R.id.drawer_layout);
+        navButton = (Button)findViewById(R.id.nav_button);
+
+        swipeRefresh = (SwipeRefreshLayout)findViewById(R.id.swipe_refresh);
+        swipeRefresh.setColorSchemeResources(R.color.colorPrimary);
+
         weatherLayout = (ScrollView) findViewById(R.id.weather_layout);
         titleCity = (TextView) findViewById(R.id.title_city);
         titleUpdateTime = (TextView) findViewById(R.id.title_update_time);
@@ -103,8 +126,16 @@ public class WeatherActivity extends AppCompatActivity {
 //            weatherLayout.setVisibility(View.VISIBLE);
             // 加载动画
             showProgressDialog();
-            requestHeWeatherInfo();
+            // 先确定地点然后查天气
+            searchArea();
         }
+
+        navButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                drawerLayout.openDrawer(GravityCompat.START);
+            }
+        });
 
         String bingPic = prefs.getString("bing_pic", null);
         if (bingPic != null) {
@@ -112,6 +143,61 @@ public class WeatherActivity extends AppCompatActivity {
         } else {
             loadBingPic();
         }
+
+        swipeRefresh.setOnRefreshListener(new SwipeRefreshLayout.OnRefreshListener() {
+            @Override
+            public void onRefresh() {
+                // 加载动画
+                showProgressDialog();
+
+                // 每日一图
+                loadBingPic();
+
+                SharedPreferences pref = getSharedPreferences("selectedCity", MODE_PRIVATE);
+                cid = pref.getString("cid","");
+
+                // 先确定地点然后查天气
+                if (cid.isEmpty()) {
+                    searchArea();
+                } else {
+                    requestHeWeatherInfo(cid);
+                }
+            }
+        });
+    }
+    private  void searchArea() {
+        // 获取经纬度
+        final LocationUtils locationUtil = LocationUtils.getInstance(this);
+        locationUtil.getLngAndLat(new LocationUtils.OnLocationResultListener() {
+            @Override
+            public void onLocationResult(Location location) {
+                String lngAndLat = location.getLongitude()+","+location.getLatitude();
+                Log.d("onLocationResult", "onLocationResult-location"+lngAndLat);
+                // 地区查询
+                HeWeather.getSearch(getBaseContext(), lngAndLat, "cn", 10, Lang.CHINESE_SIMPLIFIED, new HeWeather.OnResultSearchBeansListener() {
+                    @Override
+                    public void onError(Throwable throwable) {
+                        Log.i("getSearch-Log", "onError: ", throwable);
+                        Toast.makeText(WeatherActivity.this, "获取地区信息失败", Toast.LENGTH_SHORT).show();
+                    }
+
+                    @Override
+                    public void onSuccess(Search search) {
+                        Log.i("getWeatherNow-Log", "onSuccess: " + search.toString());
+                        List<Basic> list = search.getBasic();
+                        Basic basic = list.get(0);
+                        cid = basic.getCid();
+                        requestHeWeatherInfo(cid);
+                    }
+                });
+            }
+
+            @Override
+            public void OnLocationChange(Location location) {
+                String lngAndLat = location.getLongitude()+""+location.getLatitude();
+                Log.d("OnLocationChange", "OnLocationChange-location"+lngAndLat);
+            }
+        });
     }
     /**
      * 加载必应每日一图
@@ -150,9 +236,9 @@ public class WeatherActivity extends AppCompatActivity {
         });
     }
 
-    public void requestHeWeatherInfo() {
+    public void requestHeWeatherInfo(String cid) {
         // 即时天气
-        HeWeather.getWeatherNow(this, "CN101010100", Lang.CHINESE_SIMPLIFIED, Unit.METRIC, new HeWeather.OnResultWeatherNowBeanListener() {
+        HeWeather.getWeatherNow(this, cid, Lang.CHINESE_SIMPLIFIED, Unit.METRIC, new HeWeather.OnResultWeatherNowBeanListener() {
             @Override
             public void onError(Throwable e) {
                 Log.i("getWeatherNow-Log", "onError: ", e);
@@ -175,8 +261,13 @@ public class WeatherActivity extends AppCompatActivity {
                     public void run() {
                         // 刷新数据
                         // 城市
-                        String cityName = weatherNow.getBasic().getParent_city();
-                        titleCity.setText(cityName);
+                        if (weatherNow.getBasic().getAdmin_area().equalsIgnoreCase(weatherNow.getBasic().getLocation())) {
+                            String cityName = weatherNow.getBasic().getLocation();
+                            titleCity.setText(cityName);
+                        } else {
+                            String cityName = weatherNow.getBasic().getAdmin_area()+"-"+weatherNow.getBasic().getLocation();
+                            titleCity.setText(cityName);
+                        }
                         // 温度
                         String degree = weatherNow.getNow().getTmp() + "℃";
                         degreeText.setText(degree);
@@ -184,12 +275,15 @@ public class WeatherActivity extends AppCompatActivity {
                         // 天气信息
                         String weatherInfo = weatherNow.getNow().getCond_txt();
                         weatherInfoText.setText(weatherInfo);
+
+                        // 停止下拉动画
+                        swipeRefresh.setRefreshing(false);
                     }
                 });
             }
         });
         // 3-10天天气预报
-        HeWeather.getWeatherForecast(this,"CN101010100", Lang.CHINESE_SIMPLIFIED, Unit.METRIC, new HeWeather.OnResultWeatherForecastBeanListener() {
+        HeWeather.getWeatherForecast(this, cid, Lang.CHINESE_SIMPLIFIED, Unit.METRIC, new HeWeather.OnResultWeatherForecastBeanListener() {
             @Override
             public void onError(Throwable e) {
                 Log.i("getWeatherForecast-Log", "onError:", e);
@@ -222,6 +316,9 @@ public class WeatherActivity extends AppCompatActivity {
                             maxText.setText("最高气温"+forecast.getTmp_max() + "℃");
                             minText.setText("最低气温"+forecast.getTmp_min() + "℃");
                             forecastLayout.addView(view);
+
+                            // 停止下拉动画
+                            swipeRefresh.setRefreshing(false);
                         }
                         closeProgressDialog();
                     }
@@ -229,7 +326,7 @@ public class WeatherActivity extends AppCompatActivity {
             }
         });
         // 空气质量
-        HeWeather.getAirNow(this, "北京", Lang.CHINESE_SIMPLIFIED, Unit.METRIC, new HeWeather.OnResultAirNowBeansListener() {
+        HeWeather.getAirNow(this, cid, Lang.CHINESE_SIMPLIFIED, Unit.METRIC, new HeWeather.OnResultAirNowBeansListener() {
             @Override
             public void onError(Throwable e) {
                 Log.i("getAirNow-Log", "onError", e);
@@ -252,13 +349,16 @@ public class WeatherActivity extends AppCompatActivity {
                         if (airNow.getAir_now_city().getAqi() != null) {
                             aqiText.setText(airNow.getAir_now_city().getAqi());
                             pm25Text.setText(airNow.getAir_now_city().getPm25());
+
+                            // 停止下拉动画
+                            swipeRefresh.setRefreshing(false);
                         }
                     }
                 });
             }
         });
         // 生活指数
-        HeWeather.getWeatherLifeStyle(this, "北京", Lang.CHINESE_SIMPLIFIED, Unit.METRIC, new HeWeather.OnResultWeatherLifeStyleBeanListener() {
+        HeWeather.getWeatherLifeStyle(this, cid, Lang.CHINESE_SIMPLIFIED, Unit.METRIC, new HeWeather.OnResultWeatherLifeStyleBeanListener() {
             @Override
             public void onError(Throwable e) {
                 Log.i("getWeatherLifeStyle-Log", "onError", e);
@@ -290,6 +390,9 @@ public class WeatherActivity extends AppCompatActivity {
                                 sportText.setText(sport);
                             }
                         }
+
+                        // 停止下拉动画
+                        swipeRefresh.setRefreshing(false);
                     }
                 });
             }

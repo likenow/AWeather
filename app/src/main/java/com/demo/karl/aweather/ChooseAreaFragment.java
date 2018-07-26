@@ -104,7 +104,7 @@ public class ChooseAreaFragment extends Fragment {
             public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
                 if (currentLevel == LEVEL_PROVINCE) {
                     selectedProvince = provinceList.get(position);
-//                    queryCities(); TODO 因获取市县的接口不能使用了，所以demo中全部使用--北京，后续会优化选择城市和定位
+                    queryCities();
                     Intent intent = new Intent(getActivity(), WeatherActivity.class);
                     startActivity(intent);
                     getActivity().finish();
